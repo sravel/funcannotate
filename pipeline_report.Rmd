@@ -1,0 +1,174 @@
+---
+title: "Genome Reanotation report"
+author: "Alexandre soriano"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+params:
+   rmd: "pipeline_report.Rmd"
+output:
+  html_document:
+  highlight: tango
+  number_sections: no
+  theme: default
+  toc: yes
+  toc_depth: 3
+  
+  toc_float:
+    collapsed: no
+    smooth_scroll: yes
+
+---
+
+    
+<style type="text/css">
+.main-container {
+  max-width: 1200px;
+  margin-left: auto;
+  margin-right: auto;
+}
+</style>
+
+## Protein length
+
+Display histogram of gene length before and after filtering (if filtering as been used.)
+
+
+```{r protein_size_plot, message=FALSE, echo=FALSE, warning=FALSE}
+require(ggplot2)
+require(gridExtra)
+
+fasta_index = read.table(snakemake@input[["fasta_index"]])
+fasta_index_98 = fasta_index[fasta_index[,2] < quantile(fasta_index[,2], 0.98),]
+length = fasta_index[,2]
+length2 = fasta_index[,2]/2
+
+if(!is.null(snakemake@params[["to_remove_string"]])){
+  to_remove_list <- readLines(snakemake@params[["to_remove_string"]])
+}
+
+
+# hist(length)
+# qplot(length,
+#       geom="histogram",
+#       binwidth = 150,
+#       main = "Histogram for protein length",
+#       xlab = "Length",
+#       fill=I("blue"),
+#       alpha=I(.4),
+#       xlim=c(0,max(length)),
+#       ) + ggplot2::theme_classic()
+# 
+# if(!is.null(snakemake@params[["to_remove_string"]])){
+#   qplot(length[! fasta_index[,1] %in% to_remove_list],
+#       geom="histogram",
+#       binwidth = 150,
+#       main = "Histogram for protein length after correction",
+#       xlab = "Length",
+#       fill=I("blue"),
+#       alpha=I(.4),
+#       xlim=c(0,max(length)),
+#       ) + ggplot2::theme_classic()
+#   hist(length[! fasta_index[,1] %in% to_remove_list])
+# 
+#     plot(ecdf(length), xlim=c(0,quantile(length, 0.98)),
+#      col="green")
+#   lines(ecdf(length[! fasta_index[,1] %in% to_remove_list]),
+#       col="blue")
+# 
+# }
+
+if(!is.null(snakemake@params[["to_remove_string"]])){
+  before_density = ggplot(fasta_index, aes(V2)) +
+  geom_density() +  xlab("Raw protein length") + ylab("Density") + theme_bw()
+after_dentisty = ggplot(fasta_index[! fasta_index[,1] %in% to_remove_list,], aes(V2)) +
+  geom_density() +  xlab("Gene protein after purification") + ylab("Density") + theme_bw()
+grid.arrange(before_density, after_dentisty, ncol=2)
+
+    plot(ecdf(length), xlim=c(0,quantile(length, 0.98)),
+     col="green")
+  lines(ecdf(length[! fasta_index[,1] %in% to_remove_list]),
+      col="blue")
+} else {
+  ggplot(fasta_index, aes(V2)) +
+  geom_density() +  xlab("Raw protein length") + ylab("Density") + theme_bw()
+}
+
+# before_density = ggplot(fasta_index, aes(V2)) +
+#   geom_density() +  xlab("Raw protein length") + ylab("Density") + theme_bw()
+# after_dentisty = ggplot(fasta_index[!fasta_index[,1] %in% to_remove_list], aes(V2)) +
+#   geom_density() +  xlab("Gene protein after purification") + ylab("Density") + theme_bw()
+# grid.arrange(before_density, after_dentisty, ncol=2)
+# 
+# # ggplot(fasta_index, aes(V2, fill="red")) +
+#   geom_histogram(binwidth = 50, alpha = 0.5, 
+#                  position = "dodge") +
+#   geom_vline(xintercept = 150)
+# 
+# ggplot(fasta_index_98, aes(V2, fill=V2)) +
+#   geom_histogram(binwidth = 50, alpha = 0.5, 
+#                  position = "dodge") +
+#   geom_vline(xintercept = 150)
+
+
+```
+
+## ISS Distribution
+
+Display ISS distribution for input proteome and input repeat database.
+
+```{r ISS_Distribution, message=FALSE, echo=FALSE, warning=FALSE,  out.width = '100%'}
+
+ISS_protein = read.table(snakemake@input[["ISS_protein"]], sep = "\t", header = FALSE, quote = "", row.names = 1, comment.char = "")
+# print(ISS_protein)
+
+ggplot(ISS_protein, aes(V6)) + geom_histogram(stat = "count", fill = "blue", alpha = 0.5) +  ggplot2::theme_bw() + labs(title="Protein ISS Distribution", y="Number of genes", x="ISS")
+
+ISS_TE = read.table(snakemake@input[["ISS_TE"]], sep = "\t", header = FALSE, quote = "", row.names = 1, comment.char = "")
+
+ggplot(ISS_TE, aes(V6)) + geom_histogram(stat = "count", fill = "blue", alpha = 0.5) +  ggplot2::theme_bw() + labs(title="TE ISS Distribution", y="Number of genes", x="ISS")
+
+```
+
+## Filter summary
+
+Display a summary of the number of gene remove by each filter. Genes that are annoted as busco hit are kept regardless of the category they fall in.
+
+```{r filter_summary, message=FALSE, echo=FALSE, warning=FALSE,  fig.width=16, fig.height=9, fig.fullwidth=TRUE}
+
+require(ComplexUpset)
+
+# filter = read.table("filter_summary_DJ123.tsv", header = TRUE, row.names = 1, sep = "\t")
+filter = read.table(snakemake@input[["filter_summary"]], header = TRUE, row.names = 1, sep = "\t")
+filter = filter[1:nrow(filter)-1,]
+# filter = read.table("./gene_info_table/filter_summary_DJ123.tsv", header = TRUE, row.names = 1, sep = "\t")
+filter = as.data.frame(filter == 1)
+
+# ComplexUpset::upset(filter, colnames(filter), width_ratio = 0.10)
+
+
+ComplexUpset::upset(
+  filter,
+  colnames(filter),
+  width_ratio = 0.05,
+  queries = list(upset_query(
+    "is_busco" , color = "darkgreen", fill = "darkgreen"
+  )),
+    # base_annotations=list(
+    #     'Intersection size'=intersection_size(
+    #         text=list(
+    #             vjust=0,
+    #             hjust=0,
+    #             angle=315
+    #         )
+    #     )
+    # ),
+  set_sizes = (
+    ###Size label
+    ComplexUpset::upset_set_size() + ggplot2::theme(axis.text.x = ggplot2::element_text(angle =
+                                                                                          90))
+  )
+)
+
+```
+
+
+

@@ -1,0 +1,8 @@
+__default__: 
+  job-name : sm.{rule}.{wildcards.sample}
+  error : logs/slurm/sm.{rule}.{wildcards.sample}.err
+  output : logs/slurm/sm.{rule}.{wildcards.sample}.out
+  partition : agap_normal 
+  #cpus-per-task : 6,
+  ntasks-per-node: 1
+  mem-per-cpu : 4G

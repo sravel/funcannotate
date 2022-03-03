@@ -1,0 +1,81 @@
+blast_databases:
+  SwissProt: "/lustre/agap/BANK/uniprot/uniprot-swissprot_33090_20210313.fasta"
+  Dalata: "/storage/replicated/cirad/web/HUBs/yam/Dioscorea_alata/Dalata_550_v2.1.protein.fa"  
+  TrEMBL: "/nfs/work/agap/BANK/uniprot/uniprot-trembl_33090_20210313.fasta"  
+
+blast_repeat_database:
+  repbase: "db/repbase23.12_aaSeq_cleaned_2020.fa"
+
+hmm_databases:
+  Retro_gag: "db/Retrotran_gag_3.hmm"
+  retro_gypsy: "db/Transposase_28_Gypsy.hmm"
+
+input_proteome:
+  pangenome: "/home/drocg/scratch/transcriptome/predict_results/Dioscorea_alata.proteins.fa"
+
+input_gff3:
+  pangenome: "/home/drocg/scratch/transcriptome/predict_results/Dioscorea_alata_with_name.gff3"
+
+input_genomes:
+  pangenome: "/home/drocg/scratch/transcriptome/predict_results/Dioscorea_alata.scaffolds.fa"
+
+#Should be DL from https://busco-data.ezlab.org/v5/data/lineages/ and uncompress    
+lineage: "viridiplantae_odb10"
+busco_path: "db/busco_downloads/"
+
+use_diamond: 1
+only_reannotate: 0
+
+keywork_to_remove:
+  - "Retrotrans_gag"
+  - "polyprotein"
+  - "Gag.Pol"
+  - "Gypsy"
+  - "Copia"
+  - "Reverse transcriptase"
+  - "transpos"
+  - "elomer"
+  - "Elongation factor"
+  - "EF-Ts"
+
+#TODO : Double check this list with https://gitlab.southgreen.fr/hub/vaniseq/-/wikis/Gene-Filtering-VANPL_CR0040_3300M_all_ctg#ipr2-ipr018289-mule-transposase-domain-yes-but-ipr031052-no-far1-family-and-no-modules
+ipro_term_to_remove:
+  - "IPR000123"
+  - "IPR015706"
+  - "IPR013103"
+  - "IPR003036"
+  - "IPR002079"
+  - "IPR004004"
+  - "IPR003141"
+  - "IPR005162"
+  - "IPR000721"
+  - "IPR014817"
+  - "IPR014834"
+  - "IPR016195"
+  - "IPR015699"
+  - "IPR004312"
+  - "IPR001584"
+  - "IPR004332"
+
+fasta_split_number: 30
+
+#tag: "Name"
+tag: "ID"
+
+params:
+  global_blast_threads: 8
+  interproscan_threads: 8
+  global_diamond_threads: 8
+  busco_threads: 8
+
+modules:
+  samtools: "samtools/1.14-bin"
+  hmmer: "hmmer/3.3.2-bin"
+  blast: "ncbi-blast/2.10.1+"
+  interproscan: "interproscan/5.48-83.0"
+  seqkit: "seqkit/2.0.0"
+  diamond: "diamond/2.0.11"
+  func_annot: "functional_annotation/1.0.0"
+  gffread: "gffread/0.12.6"
+  busco: "busco/5.0.0"
+  R: "R/packages/4.1.0"
