@@ -1,6 +1,5 @@
 blast_databases:
-  SwissProt: "/lustre/agap/BANK/uniprot/uniprot-swissprot_33090_20210313.fasta"
-  Dalata: "/storage/replicated/cirad/web/HUBs/yam/Dioscorea_alata/Dalata_550_v2.1.protein.fa"  
+  SwissProt : "/lustre/agap/BANK/uniprot/uniprot-swissprot_33090_20210313.fasta"
   TrEMBL: "/nfs/work/agap/BANK/uniprot/uniprot-trembl_33090_20210313.fasta"  
 
 blast_repeat_database:
@@ -11,21 +10,20 @@ hmm_databases:
   retro_gypsy: "db/Transposase_28_Gypsy.hmm"
 
 input_proteome:
-  pangenome: "/home/drocg/scratch/transcriptome/predict_results/Dioscorea_alata.proteins.fa"
+  "DJ123": "/lustre/sorianoa/eugene_annotation_rice_new/output_egnep_2/DJ123/DJ123_prot.fna"
 
 input_gff3:
-  pangenome: "/home/drocg/scratch/transcriptome/predict_results/Dioscorea_alata_with_name.gff3"
+  "DJ123": "/lustre/sorianoa/eugene_annotation_rice_new/output_egnep_2/DJ123/DJ123.gff3"
 
 input_genomes:
-  pangenome: "/home/drocg/scratch/transcriptome/predict_results/Dioscorea_alata.scaffolds.fa"
+  "DJ123": "/lustre/sorianoa/eugene_annotation_rice_new/output_egnep_2/DJ123/DJ123"
 
 #Should be DL from https://busco-data.ezlab.org/v5/data/lineages/ and uncompress    
-lineage: "viridiplantae_odb10"
 busco_path: "db/busco_downloads/"
-
+lineage: "poales_odb10"
 use_diamond: 1
 only_reannotate: 0
-
+tag: "ID"
 keywork_to_remove:
   - "Retrotrans_gag"
   - "polyprotein"
@@ -38,7 +36,7 @@ keywork_to_remove:
   - "Elongation factor"
   - "EF-Ts"
 
-#TODO : Double check this list with https://gitlab.southgreen.fr/hub/vaniseq/-/wikis/Gene-Filtering-VANPL_CR0040_3300M_all_ctg#ipr2-ipr018289-mule-transposase-domain-yes-but-ipr031052-no-far1-family-and-no-modules
+#TODO : Double check this list with https://gitlab.southgreen.fr/hub/vaniseq/-/wikis/Gene-Filtering-VANPL_CR0040_3300M_all_ctg#ipr2-ipr018289-mule-transposase-domain-yes-but-ipr031052-no-far1-family-and-no-modules. This has been done.
 ipro_term_to_remove:
   - "IPR000123"
   - "IPR015706"
@@ -56,17 +54,19 @@ ipro_term_to_remove:
   - "IPR004312"
   - "IPR001584"
   - "IPR004332"
+  - "IPR004028"
+  - "IPR004957"
+  - "IPR003545"
+  - "IPR018289"
 
-fasta_split_number: 30
 
-#tag: "Name"
-tag: "ID"
+fasta_split_number: 4
 
 params:
-  global_blast_threads: 8
-  interproscan_threads: 8
-  global_diamond_threads: 8
-  busco_threads: 8
+  global_blast_threads: 14
+  interproscan_threads: 14
+  global_diamond_threads: 14
+  busco_threads: 10 
 
 modules:
   samtools: "samtools/1.14-bin"
