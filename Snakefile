@@ -7,7 +7,7 @@ import re
 import os
 import snakemake
 from snakemake.io import expand, multiext, glob_wildcards, directory
-from snakemake.utils import R
+#from snakemake.utils import R
 # import ipdb
 
 # Globals ---------------------------------------------------------------------
