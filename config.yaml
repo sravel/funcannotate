@@ -20,7 +20,7 @@ input_genomes:
 
 #Should be DL from https://busco-data.ezlab.org/v5/data/lineages/ and uncompress    
 busco_path: "db/busco_downloads/"
-lineage: "poales_odb10"
+lineage: "viridiplantae_odb10"
 use_diamond: 1
 only_reannotate: 0
 tag: "ID"
