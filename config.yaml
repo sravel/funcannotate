@@ -1,14 +1,21 @@
-blast_databases:
-  SwissProt : "/lustre/agap/BANK/uniprot/uniprot-swissprot_33090_20210313.fasta"
-  TrEMBL: "/nfs/work/agap/BANK/uniprot/uniprot-trembl_33090_20210313.fasta"  
 
-blast_repeat_database:
-  repbase: "db/repbase23.12_aaSeq_cleaned_2020.fa"
-
-hmm_databases:
-  Retro_gag: "db/Retrotran_gag_3.hmm"
-  retro_gypsy: "db/Transposase_28_Gypsy.hmm"
-
+# Genome to be annotated (Assembly, GFF3 and corresponding protein fasta file)
+# Same keys for a genome, can be multiple
+#input_proteome:
+#  "genomeA": "path_to_proteomeA"
+#  "genomeB": "path_to_proteomeB"
+#  "genomeX": "path_to_proteomeX"
+  
+#input_gff3:
+#  "genomeA": "path_to_gffA"
+#  "genomeB": "path_to_gffB"
+#  "genomeX": "path_to_gffX"
+  
+#input_genomes:
+#  "genomeA": "path_to_genomeA"
+#  "genomeB": "path_to_genomeB"
+#  "genomeX": "path_to_genomeX"
+  
 input_proteome:
   "DJ123": "/lustre/sorianoa/eugene_annotation_rice_new/output_egnep_2/DJ123/DJ123_prot.fna"
 
@@ -18,12 +25,38 @@ input_gff3:
 input_genomes:
   "DJ123": "/lustre/sorianoa/eugene_annotation_rice_new/output_egnep_2/DJ123/DJ123"
 
+# Function transfer based on sequence similarity 
+# The list is ordered according to the trust given to the database. 
+# 
+blast_databases:
+  SwissProt : "/lustre/agap/BANK/uniprot/uniprot-swissprot_33090_20210313.fasta"
+  TrEMBL: "/nfs/work/agap/BANK/uniprot/uniprot-trembl_33090_20210313.fasta"  
+
+
 #Should be DL from https://busco-data.ezlab.org/v5/data/lineages/ and uncompress    
 busco_path: "db/busco_downloads/"
 lineage: "viridiplantae_odb10"
+
+# Method for the protein similarity search (1 for diamond, 0 for blastp)
 use_diamond: 1
-only_reannotate: 0
+
+# GFF3 Tag corresponding to sequence identifier (input_proteome)
+# Allowed values are: ID, Name, locus_tag
+# Require for GFF3 enrichment
 tag: "ID"
+
+# 0 Only perform functional annotation (BLAST/Diamond + InterProScan)
+# 1 For filter and check annotation quality ( filter transposable element genes and doubtful genes), refer to https://gitlab.southgreen.fr/hub/vaniseq/-/wikis/Gene-Filtering-VANPL_CR0040_3300M_all_ctg
+only_reannotate: 0
+
+# 
+blast_repeat_database:
+  repbase: "db/repbase23.12_aaSeq_cleaned_2020.fa"
+
+hmm_databases:
+  Retro_gag: "db/Retrotran_gag_3.hmm"
+  retro_gypsy: "db/Transposase_28_Gypsy.hmm"
+
 keywork_to_remove:
   - "Retrotrans_gag"
   - "polyprotein"
@@ -36,7 +69,6 @@ keywork_to_remove:
   - "Elongation factor"
   - "EF-Ts"
 
-#TODO : Double check this list with https://gitlab.southgreen.fr/hub/vaniseq/-/wikis/Gene-Filtering-VANPL_CR0040_3300M_all_ctg#ipr2-ipr018289-mule-transposase-domain-yes-but-ipr031052-no-far1-family-and-no-modules. This has been done.
 ipro_term_to_remove:
   - "IPR000123"
   - "IPR015706"
@@ -59,15 +91,17 @@ ipro_term_to_remove:
   - "IPR003545"
   - "IPR018289"
 
+# Split FASTA into 10 files (increase/decrease this value if need, 5000 sequence for each part is recommended) 
+fasta_split_number: 10
 
-fasta_split_number: 4
-
+# Threads
 params:
   global_blast_threads: 14
   interproscan_threads: 14
   global_diamond_threads: 14
   busco_threads: 10 
 
+# Use envmodules (muse-login01)
 modules:
   samtools: "samtools/1.14-bin"
   hmmer: "hmmer/3.3.2-bin"
