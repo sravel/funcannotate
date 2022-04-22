@@ -6,29 +6,80 @@ import sys
 import re
 import os
 import snakemake
-from snakemake.io import expand, multiext, glob_wildcards, directory
+from snakemake import rules
+from snakemake.io import expand, multiext, glob_wildcards, directory, temp, unpack
+from collections import defaultdict, OrderedDict
+from pprint import pprint as pp
+from pathlib import Path
 #from snakemake.utils import R
 # import ipdb
 
-# Globals ---------------------------------------------------------------------
-my_files=config["input_proteome"]
-my_gff3=config["input_gff3"]
-
-if("input_genomes" in config):
-    if config["input_genomes"] is not None:
-        my_genomes=config["input_genomes"]
+def var_2_bool(key, tool, to_convert):
+    """convert to boolean"""
+    if isinstance(type(to_convert), bool):
+        return to_convert
+    elif f"{to_convert}".lower() in ("yes", "true", "t"):
+        return True
+    elif f"{to_convert}".lower() in ("no", "false", "f"):
+        return False
+    elif to_convert == 1:
+        return False
+    elif to_convert == 0:
+        return True
     else:
-        my_genomes = []
-else:
-    my_genomes=[]
+        raise TypeError(
+            f'CONFIG FILE CHECKING FAIL : in the "{key}" section, "{tool}" key: "{to_convert}" is not a valid boolean')
 
-##TODO : check that are the keys in my_file are present in my genome. More robust.
-# if config["only_reannotate"] != 0 & len(my_genomes.keys()) < len(my_files.keys()):
-#     print("You must provide a genome for each species annotation purification.")
-#     os._exit(0)
 
-if my_gff3.keys() != my_genomes.keys():
-    exit("gff3 and genome names are different. Please make sure that they are identical. You can check that in the config file.")
+###Take the output of hmmsearch, a pvalue cutoff, and return a pandas df with matching genes in query and their associated evalue.
+def parse_hmmsearch_results(hmm_file, pvalue_cutoff):
+    list_evalue = []
+    list_id = []
+    print("Starting")
+    print(hmm_file)
+    for qresult in SearchIO.parse(hmm_file, 'hmmer3-text'):
+        hits = qresult.hits
+        print("Hits...")
+        print(hits)
+        if len(hits) > 0:
+            for i in range(0,len(hits)):
+                if hits[i].evalue < pvalue_cutoff:
+                    hit_evalue = hits[i].evalue
+                    hit_id = hits[i].id
+                    list_evalue.append(hit_evalue)
+                    list_id.append(hit_id)
+    return(pd.DataFrame({'evalue': list_evalue}, index=list_id))
+
+
+
+# Globals ---------------------------------------------------------------------
+SAMPLE,FILES,   = glob_wildcards(f"{config['SAMPLES']}{{sample}}/{{files}}", followlinks=True)
+SAMPLES = set(SAMPLE)
+# print(FILES)
+
+dico_samples = defaultdict(OrderedDict)
+for smp in SAMPLES:
+    for file_in in FILES:
+        if smp in file_in:
+            file_path = Path(config['SAMPLES']).joinpath(smp, file_in)
+            if "_prot" in  file_in:
+                dico_samples[smp]["protein"] = file_path.as_posix()
+            if file_path.suffix in ".gff3":
+                dico_samples[smp]["gff"] =  file_path.as_posix()
+            if file_path.suffix  in ".fasta" and not "_prot" in  file_in:
+                dico_samples[smp]["fasta"] =  file_path.as_posix()
+# pp(dico_samples)
+
+###Perform some verifications
+fasta_list = [True if "fasta" in dico.keys() else False for key, dico in dico_samples.items() ]
+gff_list = [True if "gff" in dico.keys() else False for key, dico in dico_samples.items() ]
+prot_list = [True if "protein" in dico.keys() else False for key, dico in dico_samples.items() ]
+if len(dico_samples) != fasta_list.count(True):
+    raise SystemExit("Error, Not provided fasta for all Samples.")
+if gff_list.count(True) != fasta_list.count(True):
+    raise SystemExit("Error, Not provided fasta for all gff3 maybe genome names are different. Please make sure that they are identical.")
+if prot_list.count(True) != fasta_list.count(True):
+    raise SystemExit("Error, Not provided fasta for all protein maybe genome names are different. Please make sure that they are identical.")
 
 
 blast_databases_annot = config["blast_databases"]
@@ -38,117 +89,83 @@ hmm_databases = config["hmm_databases"]
 ### Merge all the blast databases (repeat or not) in one structure
 blast_databases = blast_databases_annot.copy()
 
-if config["only_reannotate"] == 0:
-    blast_databases_repeat = config["blast_repeat_database"]
+only_reannotate = var_2_bool(key="only_reannotate",tool="only_reannotate", to_convert=config["only_reannotate"])
+# print(only_reannotate)
+if only_reannotate:
     blast_databases.update(blast_databases_repeat)
 
 blast_threads=config["params"]["global_blast_threads"]
+# print(blast_databases_annot)
+# print(blast_databases_repeat)
+# print(blast_databases)
+# print(hmm_databases)
 
 
 ###Indices for the fasta splited files, in the form of '001', '002'...
-my_indices=[]
-fasta_split_number=config["fasta_split_number"]
-for x in range(1,fasta_split_number+1): ##Because the last value is exclude. If it's a 4, the range will stop to 3.
-    my_indices.append('%03d' % x)
-
-# ipdb.set_trace()
-###Perform some verifications
-
-if my_gff3.keys() != my_files.keys():
-    exit("gff3 and proteome keys are different. Please make sure that they are identical.")
-
-
-wildcard_constraints:
-    sample= "|".join(my_files.keys())
+my_indices=[f"{i:03d}" for i in range(1, config["fasta_split_number"]+1)]
 
 rule all:
     input:
-        expand("pipeline_report_{sample}.html", sample=my_files.keys()),
-        expand("enriched_gff3/{sample}/{sample}_proteins.fasta.fai", sample=my_files.keys()) if len(my_genomes)>0 else expand("enriched_gff3/{sample}/{sample}_mrna.gff3", sample=my_files.keys())
+        expand("pipeline_report_{sample}.html", sample=SAMPLES),
+        expand("enriched_gff3/{sample}/{sample}_proteins.fasta.fai", sample=SAMPLES) if False not in fasta_list else expand("enriched_gff3/{sample}/{sample}_mrna.gff3", sample=SAMPLES)
 
+def get_fasta(wildcards):
+    return {"fasta": dico_samples[f"{wildcards.sample}"]["fasta"]}
 
-############################################
-### Create a symoblic link with a nice name for the fasta files.
-rule fasta_symlink:
-    input:
-        lambda wildcards: my_files[wildcards.sample]
-        # my_files.values()
-    output:
-       "input_fasta/{sample}.fasta"
-    shell:
-        "ln -s {input} {output}"
+def get_gff(wildcards):
+    return {"gff3": dico_samples[f"{wildcards.sample}"]["gff"]}
 
+def get_prot(wildcards):
+    return {"protein": dico_samples[f"{wildcards.sample}"]["protein"]}
+
+def get_db_name(wildcards):
+    if wildcards.db_name in blast_databases:
+        return {"db_name": blast_databases[f"{wildcards.db_name}"]}
+    if wildcards.db_name in blast_databases_repeat:
+        return {"db_name": blast_databases_repeat[f"{wildcards.db_name}"]}
+
+wildcard_constraints:
+    sample= "|".join(SAMPLES)
 ###########################################
 ### Create fasta index (used to get sequence length)
 rule fasta_index:
     input:
-        "input_fasta/{sample}.fasta"
+        unpack(get_fasta),
     output:
-        "input_fasta/{sample}.fasta.idx" ###FIXME : .fai... not idx !
+        index = touch("toto_{sample}") ###FIXME : .fai... not idx !
     envmodules:
         config["modules"]["samtools"]
     log:
         out="logs/fasta_index/{sample}.log",
         err="logs/fasta_index/{sample}.err"
     shell:
-        "samtools faidx --fai-idx {output} {input} > {log.out} 2> {log.err}"
+        "samtools faidx --fai-idx {output.index} {input.fasta} > {log.out} 2> {log.err}"
 
-
-if config["only_reannotate"]:
-    rule report_only_annotate:
-        input:
-            fasta_index="input_fasta/{sample}.fasta.idx",
-            ISS_protein="blast/ISS_informations/results_{sample}.iss",
-        output:
-            "pipeline_report_{sample}.html"
-        envmodules:
-            config["modules"]["R"]
-        script:
-            "pipeline_report.Rmd"
-else:
-    rule report_reannotation:
-        input:
-            fasta_index="input_fasta/{sample}.fasta.idx",
-            ISS_protein="blast/ISS_informations/results_{sample}.iss",
-            ISS_TE="blast/ISS_informations/results_{sample}_TE.iss",
-            processed_gff= "enriched_gff3/{sample}/{sample}_mrna.gff3",
-            filter_summary="gene_info_table/filter_summary_{sample}.tsv",
-            proteins_index="enriched_gff3/{sample}/{sample}_proteins.fasta.fai",
-            busco_in="busco/input/{sample}/done",
-            busco_out="busco/output/{sample}/done"
-        output:
-            "pipeline_report_{sample}.html"
-        envmodules:
-            config["modules"]["R"]
-        params:
-            to_remove_string="gene_info_table/{sample}_to_remove.tsv" if config["only_reannotate"] == 0 else "",
-            filter_summary="gene_info_table/filter_summary_{sample}.tsv" if config["only_reannotate"] == 0 else ""
-        script:
-            "pipeline_report.Rmd"
 
 ####################################
 ### Split files in n pieces
 rule split:
     input:
-        "input_fasta/{sample}.fasta"
+        unpack(get_fasta),
     output:
-        temp(expand("tmp_fasta/{{sample}}/{{sample}}.part_{n}.fasta", n=my_indices))
+        list_fasta = temp(expand("tmp_fasta/{{sample}}/{{sample}}.part_{n}.fasta",sample="{sample}", n=my_indices))
     params:
-        number_of_output_fasta=fasta_split_number
+        number_of_output_fasta = config["fasta_split_number"],
+        sample = "{sample}"
     envmodules:
         config["modules"]["seqkit"]
     log:
         out="logs/split/{sample}.log",
         err="logs/split/{sample}.err"
     shell:
-        "seqkit split --out-dir tmp_fasta/{wildcards.sample} --by-part {params.number_of_output_fasta} {input} > {log.out} 2> {log.err}"
+        "seqkit split --out-dir tmp_fasta/{params.sample} --by-part {params.number_of_output_fasta} {input.fasta} > {log.out} 2> {log.err}"
 
 ####################################
 ### Blast Part
 
 rule build_blast_databases:
     input:
-        lambda wildcards: blast_databases[wildcards.db_name]
+        unpack(get_db_name)
     output:
         done=touch("blast/blast_databases/{db_name}.makeblastdb.done")
     envmodules:
@@ -161,7 +178,7 @@ rule build_blast_databases:
 
 rule build_diamond_database:
     input:
-        blast_db="blast/blast_databases/{db_name}.makeblastdb.done"
+        blast_db=rules.build_blast_databases.output.done
     output:
         done=touch("blast/blast_databases/{db_name}.diamonddb.done")
     envmodules:
@@ -175,13 +192,13 @@ rule build_diamond_database:
 
 rule diamond_analysis:
     input:
-        fasta_files="tmp_fasta/{sample}/{sample}.part_{indice}.fasta",
-        blast_db="blast/blast_databases/{db_name}.diamonddb.done"
+        fasta_files=rules.split.output.list_fasta,
     output:
-        temp("blast/raw_diamond_output/{sample}/{db_name}_file_{sample}.part_{indice}.tsv")
+        tsv = temp("blast/raw_diamond_output/{sample}/{db_name}_file_{sample}.part_{indice}.tsv")
     envmodules:
         config["modules"]["diamond"]
     params:
+        blast_db = rules.build_diamond_database.output.done,
         evalue=1e-10,
         max_target_seqs=2,
         mode="--very-sensitive",
@@ -196,14 +213,15 @@ rule diamond_analysis:
 
 rule blastp_computation:
     input:
-        fasta_files="tmp_fasta/{sample}/{sample}.part_{indice}.fasta",
-        blast_db="blast/blast_databases/{db_name}.makeblastdb.done"
+        fasta_files=rules.split.output.list_fasta,
     output:
-        temp("blast/raw_output/{sample}/{db_name}_file_{sample}.part_{indice}.tsv")
+        tsv = temp("blast/raw_output/{sample}/{db_name}_file_{sample}.part_{indice}.tsv")
     params:
+        blast_db = rules.build_blast_databases.output.done,
         evalue=1e-10,
         max_target_seqs=2,
-        output_format="-outfmt '6 qseqid qlen sseqid slen stitle evalue pident qcovhsp scovhsp  sstart send length'"
+        output_format="-outfmt '6 qseqid qlen sseqid slen stitle evalue pident qcovhsp scovhsp  sstart send length'",
+        db_name = "{db_name}"
     envmodules:
         config["modules"]["blast"]
     threads:
@@ -212,12 +230,12 @@ rule blastp_computation:
         out="logs/blastp_computation/{sample}_{indice}_{db_name}.log",
         err="logs/blastp_computation/{sample}_{indice}_{db_name}.err"
     shell:
-        "blastp -db blast/blast_databases/{wildcards.db_name} {params.output_format} -query {input.fasta_files} -out {output} -num_threads {threads} -evalue {params.evalue} -max_target_seqs {params.max_target_seqs} > {log.out} 2> {log.err}"
+        "blastp -db blast/blast_databases/{params.db_name} {params.output_format} -query {input.fasta_files} -out {output} -num_threads {threads} -evalue {params.evalue} -max_target_seqs {params.max_target_seqs} > {log.out} 2> {log.err}"
 
 
 rule merge_blast_results:
     input:
-        expand("blast/raw_output/{{sample}}/{{db_name}}_file_{{sample}}.part_{indice}.tsv", indice=my_indices) if config["use_diamond"] == 0 else  expand("blast/raw_diamond_output/{{sample}}/{{db_name}}_file_{{sample}}.part_{indice}.tsv", indice=my_indices)
+        expand(rules.blastp_computation.output.tsv, sample="{sample}", db_name="{db_name}", indice=my_indices) if config["use_diamond"] == 0 else  expand(rules.diamond_analysis.output.tsv, sample="{sample}", db_name="{db_name}", indice=my_indices)
     output:
         "blast/merged_output/{db_name}_{sample}.tsv"
     log:
@@ -231,55 +249,56 @@ rule merge_blast_results:
 ###TODO : Need to find which ISS is the best before going to the filtering part. We need to have like one file "Best ISS prot" and one other "Best ISS TE"
 rule compute_ISS_proteins:
     input:
-        db_repeat=expand("blast/merged_output/{db_name}_{{sample}}.tsv", db_name=blast_databases_annot.keys())
+        db_annot=expand("blast/merged_output/{db_name}_{{sample}}.tsv", db_name=list(blast_databases_annot.keys()))
     output:
-        "blast/ISS_informations/results_{sample}.iss"
+        iss = "blast/ISS_informations/results_{sample}.iss"
     params:
-        db_annotation=' --blast '.join(expand("blast/merged_output/{db_name}_{{sample}}.tsv",db_name=blast_databases_annot.keys()))
+        db_annotation=' --blast '.join(expand("blast/merged_output/{db_name}_{{sample}}.tsv",db_name=list(blast_databases_annot.keys())))
     envmodules:
         config["modules"]["func_annot"]
     log:
         out="logs/compute_ISS_proteins/{sample}.log",
         err="logs/compute_ISS_proteins/{sample}.err"
     shell:
-        "cnv_blast.pl --blast {params.db_annotation} --out {output}  > {log.out} 2> {log.err}"
+        "cnv_blast.pl --blast {params.db_annotation} --out {output.iss}  > {log.out} 2> {log.err}"
 
 rule compute_ISS_TE:
     input:
-        db_repeat=expand("blast/merged_output/{db_name}_{{sample}}.tsv", db_name=blast_databases_repeat.keys())
+        db_repeat=expand("blast/merged_output/{db_name}_{{sample}}.tsv", db_name=list(blast_databases_repeat.keys()))
     output:
-        "blast/ISS_informations/results_{sample}_TE.iss"
+        iss = "blast/ISS_informations/results_{sample}_TE.iss"
     params:
-        db_repeat_TE=' --blast '.join(expand("blast/merged_output/{db_name}_{{sample}}.tsv",db_name=blast_databases_repeat.keys()))
+        db_repeat_TE=' --blast '.join(expand("blast/merged_output/{db_name}_{{sample}}.tsv",db_name=list(blast_databases_repeat.keys())))
     envmodules:
         config["modules"]["func_annot"]
     log:
         out="logs/compute_ISS_TE/{sample}.log",
         err="logs/compute_ISS_TE/{sample}.err"
     shell:
-        "cnv_blast.pl  --blast {params.db_repeat_TE} --out {output}  > {log.out} 2> {log.err}"
+        "cnv_blast.pl  --blast {params.db_repeat_TE} --out {output.iss}  > {log.out} 2> {log.err}"
 
 ###TODO : Add length information to this file to improve filtering.
 ###TODO : this can be skip, just read the files in a python-like rule and merge them with python.
 rule merge_iss:
     input:
-        proteins="blast/ISS_informations/results_{sample}.iss",
-        TE="blast/ISS_informations/results_{sample}_TE.iss"
+        proteins=rules.compute_ISS_proteins.output.iss,
+        TE=rules.compute_ISS_TE.output.iss
     output:
-        "blast/ISS_informations/ISS_merged_{sample}.iss"
+        merge_iss = "blast/ISS_informations/ISS_merged_{sample}.iss"
     log:
         err="logs/merge_iss/{sample}.err"
     shell:
-        "join -t $'\t' {input.proteins} {input.TE} > {output} 2> {log.err}"
+        "join -t $'\t' {input.proteins} {input.TE} > {output.merge_iss} 2> {log.err}"
 
 ####################################
 ### Interpro Part
 
 rule interpro_scan:
     input:
-        fasta_files = "tmp_fasta/{sample}/{sample}.part_{indice}.fasta",
+        fasta_files = rules.split.output.list_fasta,
     output:
-        multiext("interproscan/raw/{sample}/{sample}.part_{indice}", ".tsv", ".xml")
+        tsv = "interproscan/raw/{sample}/{sample}.part_{indice}.tsv",
+        xml = "interproscan/raw/{sample}/{sample}.part_{indice}.xml"
     threads: config["params"]["interproscan_threads"]
     envmodules:
         config["modules"]["interproscan"]
@@ -292,13 +311,13 @@ rule interpro_scan:
 
 rule merge_interpro_results:
     input:
-        expand("interproscan/raw/{{sample}}/{{sample}}.part_{indice}.tsv", indice=my_indices)
+        expand(rules.interpro_scan.output.tsv, sample="{sample}", indice=my_indices)
     output:
-        "interproscan/merged/interpro_{sample}_merged.tsv"
+        merge_tsv = "interproscan/merged/interpro_{sample}_merged.tsv"
     log:
         err="logs/merge_interpro_results/{sample}.err"
     shell:"""
-        cat {input} > {output} 2> {log.err}
+        cat {input} > {output.merge_tsv} 2> {log.err}
     """    
 
 # xml = expand("interproscan/raw/{{sample}}/{{sample}}.part_{indice}.xml", indice=my_indices)
@@ -307,7 +326,7 @@ rule merge_interpro_results:
 #TODO : may be replaced by a bash command.
 rule run_cnv_interpro:
     input:
-        expand("interproscan/raw/{{sample}}/{{sample}}.part_{indice}.tsv", indice=my_indices)
+        expand(rules.interpro_scan.output.tsv, sample="{sample}", indice=my_indices)
     output:
         go="interproscan/cnv_interpro/{sample}_go.txt",
         ipro="interproscan/cnv_interpro/{sample}_ipr.txt"
@@ -325,12 +344,12 @@ rule run_cnv_interpro:
 
 rule add_annotation_to_gff3:
     input:
-        # ISS_full = "blast/ISS_informations/ISS_merged_{sample}.iss" if config["include_repeat_database"]!=0 else "blast/ISS_informations/results_{sample}.iss", only_reannotate
-        ISS_full = "blast/ISS_informations/results_{sample}.iss",
+        unpack(get_gff),
+        # to_remove= "gene_info_table/{sample}_to_remove.tsv" if only_reannotate else "",  ###Totaly arbitraty file. Just have to be sure that this file exists and will always be there, so input fasta was a good choice.
+# ISS_full = "blast/ISS_informations/ISS_merged_{sample}.iss" if config["include_repeat_database"]!=0 else "blast/ISS_informations/results_{sample}.iss", only_reannotate
+        ISS_full = rules.merge_iss.output.merge_iss,
         gene_ontology = {rules.run_cnv_interpro.output.go},
         interpro_res = {rules.run_cnv_interpro.output.ipro},
-        gff3 = lambda wildcards: my_gff3[wildcards.sample],
-        to_remove = "gene_info_table/{sample}_to_remove.tsv" if config["only_reannotate"]==0 else "input_fasta/{sample}.fasta.idx" ###Totaly arbitraty file. Just have to be sure that this file exists and will always be there, so input fasta was a good choice.
     output:
         processed_gff = "enriched_gff3/{sample}/{sample}_mrna.gff3"
     envmodules:
@@ -338,7 +357,7 @@ rule add_annotation_to_gff3:
     params:
         # prefix="{sample}", ###Why not wildcard.sample in the shell command ?
         tag=config["tag"],
-        to_remove_string="-te_file gene_info_table/{sample}_to_remove.tsv -rename" if config["only_reannotate"]==0 else  "" 
+        to_remove_string="-te_file gene_info_table/{sample}_to_remove.tsv -rename" if only_reannotate else  ""
     shell:
         """cnv_eugene_gff3.pl -product {input.ISS_full} {params.to_remove_string} \
         -go_file {input.gene_ontology} \
@@ -347,33 +366,23 @@ rule add_annotation_to_gff3:
         -prefix enriched_gff3/{wildcards.sample}/{wildcards.sample} \
         -tag {params.tag}"""
 
-if len(my_genomes) > 0:
-    rule genome_fasta_symlink:
-        input:
-            lambda wildcards: my_genomes[wildcards.sample]
-        output:
-            "input_fasta/{sample}_genome.fasta"
-        shell:
-            "ln -s {input} {output}"
-
-if len(my_genomes) > 0:
+if False not in fasta_list:
     rule extract_prot_cds_sequences:
         input:
-            processed_gff = "enriched_gff3/{sample}/{sample}_mrna.gff3",
-            input_fasta = "input_fasta/{sample}_genome.fasta"
+            unpack(get_fasta),
+            processed_gff = rules.add_annotation_to_gff3.output.processed_gff,
         output:
             proteins="enriched_gff3/{sample}/{sample}_proteins.fasta",
             cds="enriched_gff3/{sample}/{sample}_cds.fasta"
         envmodules:
             config["modules"]["gffread"]
         shell:
-            "gffread -g {input.input_fasta} -x {output.cds} -y {output.proteins} {input.processed_gff}"
+            "gffread -g {input.fasta} -x {output.cds} -y {output.proteins} {input.processed_gff}"
 
-if len(my_genomes) > 0:
     rule index_extracted_sequences:
         input:
-            proteins="enriched_gff3/{sample}/{sample}_proteins.fasta",
-            cds="enriched_gff3/{sample}/{sample}_cds.fasta"
+            proteins=rules.extract_prot_cds_sequences.output.proteins,
+            cds=rules.extract_prot_cds_sequences.output.cds
         output:
             proteins="enriched_gff3/{sample}/{sample}_proteins.fasta.fai",
             cds="enriched_gff3/{sample}/{sample}_cds.fasta.fai"
@@ -383,14 +392,139 @@ if len(my_genomes) > 0:
             "samtools faidx {input.proteins} && samtools faidx {input.cds}"
 
 
+
+####################################
+### HMM Part
+
+# def hmm_parse(hmm_results_file)
+# for qresult in SearchIO.parse(file_hmm_gypsy, 'hmmer3-text'):
+#     hits = qresult.hits
+#     #print(hits)
+#     if len(hits) > 0:
+#         for i in range(0,len(hits)):
+#                 if hits[i].evalue <0.01:
+#                     beste = hits[i].evalue
+#                     hit = hits[i].id.replace('.hmm', '')
+#                     bestes_gypsy.append(beste)
+#                     hitss_gypsy.append(hit)
+
+###FIXME : useless to split, hmmsearch is very fast in our case because very few input sequences.
+rule hmm_search:
+    input:
+        unpack(get_fasta),
+        hmm_file=lambda wildcards: hmm_databases[wildcards.hmm_db_name]
+    output:
+        "hmm/hmm_search/{sample}/{hmm_db_name}.txt"
+    envmodules:
+        config["modules"]["hmmer"]
+    shell:
+        "hmmsearch {input.hmm_file} {input.fasta} > {output}"
+
+rule hmm_parse:
+    input:
+        hmm_file="hmm/hmm_search/{sample}/{hmm_db_name}.txt"
+    output:
+        parsed_hmm="hmm/parsed_hmm/{sample}/{hmm_db_name}_parsed.tsv"
+    run:
+        dataframe = parse_hmmsearch_results(input.hmm_file, 0.01)
+        dataframe = dataframe.add_suffix("_"+wildcards.hmm_db_name)
+        dataframe.to_csv(output.parsed_hmm, sep="\t")
+
+
+
+###TODO : fusion de tous les hmm.tsv pour chaque sample et création d'un truc "to_remove".
+###TODO : OR - fusion de chaquun de ces fichiers dans le gros tableau. Possibilité d'avoir un beau tableau complet.
+
+# rule merge_hmm_results:
+#     input:
+#         expand("output_hmm_search/{{sample}}/{{sample}}_{{hmm_db_name}}.part_{indice}.tsv", indice=my_indices)
+#     output:
+#         "merged_hmm/hmm_{sample}_{hmm_db_name}_merged.tsv"
+#     shell:
+#         "cat {input} > {output}"
+
+
+
+rule busco_input:
+    input:
+        unpack(get_fasta),
+    output:
+        touch("busco/input/{sample}/done")
+    threads:
+        config["params"]["busco_threads"]
+    envmodules:
+        config["modules"]["busco"]
+    params:
+         lineage=config["lineage"],
+         busco_path=config["busco_path"]
+    log:
+        out="logs/busco_input/{sample}.log",
+        err="logs/busco_input/{sample}.err"
+    shell: "busco -i {input.fasta} -f -m prot -l {params.lineage} --offline -c {threads} --download_path {params.busco_path} --out_path busco/input/ -o {wildcards.sample} > {log.out} 2> {log.err}"
+
+
+
+rule merge_hmm_results:
+    input:
+        parsed_hmm=expand(rules.hmm_parse.output.parsed_hmm,sample="{sample}", hmm_db_name = list(hmm_databases.keys()))
+    output:
+        merged_hmm="hmm/hmm_merged/hmm_{sample}_full_merged.tsv"
+    # log:
+    #     out="logs/merge_hmm_results/{sample}.log",
+    #     err="logs/merge_hmm_results/{sample}.err"
+    run:
+        dfs = []
+        # ipdb.set_trace()
+        for i in input.parsed_hmm:
+            df = pd.read_table(i, index_col=0)
+            if len(df) >= 1:
+                dfs = df.join(dfs, how = "outer")
+        if len(dfs) > 1:
+            print('Multime HMM results')
+            dfs.to_csv(output.merged_hmm, sep="\t", na_rep = "NaN")
+        if len(dfs) == 1:
+            print('Single HMM results')
+            dfs[0].to_csv(output.merged_hmm, sep="\t")
+        else:
+            print("Only one HMM result... Sad.")
+            open(output.merged_hmm,'a').close() ###If the file is empty
+
+rule busco_output:
+    input:
+        fasta_prot = rules.extract_prot_cds_sequences.output.proteins
+    output:
+        done = touch("busco/output/{sample}/done")
+    threads:
+        config["params"]["busco_threads"]
+    envmodules:
+        config["modules"]["busco"]
+    params:
+         lineage=config["lineage"],
+         busco_path=config["busco_path"]
+    log:
+        out="logs/busco_output/{sample}.log",
+        err="logs/busco_output/{sample}.err"
+    shell: "busco -i {input.fasta_prot} -f -m prot -l {params.lineage} --offline -c {threads} --download_path {params.busco_path} --out_path busco/output/ -o {wildcards.sample} > {log.out} 2> {log.err}"
+
+rule extract_busco_match:
+    input:
+        done = rules.busco_output.output.done
+    output:
+        txt = "gene_info_table/busco_match_{sample}.txt"
+    params:
+         lineage=config["lineage"],
+    shell:
+        "grep -v \"^#\" busco/input/{wildcards.sample}/run_{params.lineage}/full_table.tsv | cut -f3 | sort -u | grep -v \"^$\"  > {output.txt}"
+
+
 ###This is some kind of implementation of Laila script.
 rule ISS_table_creation_and_purification:
     input:
-        ISS_full="blast/ISS_informations/ISS_merged_{sample}.iss",
-        cnv_interpro="interproscan/cnv_interpro/{sample}_ipr.txt",
-        fasta_index="input_fasta/{sample}.fasta.idx",
-        merged_hmm="hmm/hmm_merged/hmm_{sample}_full_merged.tsv",
-        busco_match="gene_info_table/busco_match_{sample}.txt"
+        ISS_full=rules.merge_iss.output.merge_iss,
+        cnv_interpro=rules.run_cnv_interpro.output.ipro,
+        fasta_index=rules.fasta_index.output.index,
+        merged_hmm=rules.merge_hmm_results.output.merged_hmm,
+        busco_match=rules.extract_busco_match.output.txt
         # hmm_results="output_hmm_search/{sample}"
     output:
         ISS_raw="gene_info_table/gene_info_table_raw_{sample}.tsv",
@@ -520,143 +654,35 @@ rule ISS_table_creation_and_purification:
 
 
 
-
-####################################
-### HMM Part
-
-# def hmm_parse(hmm_results_file)
-# for qresult in SearchIO.parse(file_hmm_gypsy, 'hmmer3-text'):
-#     hits = qresult.hits
-#     #print(hits)
-#     if len(hits) > 0:
-#         for i in range(0,len(hits)):
-#                 if hits[i].evalue <0.01:
-#                     beste = hits[i].evalue
-#                     hit = hits[i].id.replace('.hmm', '')
-#                     bestes_gypsy.append(beste)
-#                     hitss_gypsy.append(hit)
-
-###FIXME : useless to split, hmmsearch is very fast in our case because very few input sequences.
-rule hmm_search:
-    input:
-        fasta_files=lambda wildcards: my_files[wildcards.sample],
-        hmm_file=lambda wildcards: hmm_databases[wildcards.hmm_db_name]
-    output:
-        "hmm/hmm_search/{sample}/{hmm_db_name}.txt"
-    envmodules:
-        config["modules"]["hmmer"]
-    shell:
-        "hmmsearch {input.hmm_file} {input.fasta_files} > {output}"
-
-rule hmm_parse:
-    input:
-        hmm_file="hmm/hmm_search/{sample}/{hmm_db_name}.txt"
-    output:
-        parsed_hmm="hmm/parsed_hmm/{sample}/{hmm_db_name}_parsed.tsv"
-    run:
-        dataframe = parse_hmmsearch_results(input.hmm_file, 0.01)
-        dataframe = dataframe.add_suffix("_"+wildcards.hmm_db_name)
-        dataframe.to_csv(output.parsed_hmm, sep="\t")
-
-rule merge_hmm_results:
-    input:
-        parsed_hmm=expand("hmm/parsed_hmm/{{sample}}/{hmm_db}_parsed.tsv", hmm_db = hmm_databases)
-    output:
-        merged_hmm="hmm/hmm_merged/hmm_{sample}_full_merged.tsv"
-    log:
-        out="logs/merge_hmm_results/{sample}.log",
-        err="logs/merge_hmm_results/{sample}.err"
-    run:
-        dfs = []
-        # ipdb.set_trace()
-        for i in input.parsed_hmm:
-            df = pd.read_table(i, index_col=0)
-            if(len(df) >= 1):
-                dfs = df.join(dfs, how = "outer")
-        if(len(dfs) > 1):
-            print('Multime HMM results')
-            dfs.to_csv(output.merged_hmm, sep="\t", na_rep = "NaN")
-        if(len(dfs) == 1):
-            print('Single HMM results')
-            dfs[0].to_csv(output.merged_hmm, sep="\t")
-        else:
-            print("Only one HMM result... Sad.")
-            open(output.merged_hmm,'a').close() ###If the file is empty
-
-###TODO : fusion de tous les hmm.tsv pour chaque sample et création d'un truc "to_remove".
-###TODO : OR - fusion de chaquun de ces fichiers dans le gros tableau. Possibilité d'avoir un beau tableau complet.
-
-# rule merge_hmm_results:
-#     input:
-#         expand("output_hmm_search/{{sample}}/{{sample}}_{{hmm_db_name}}.part_{indice}.tsv", indice=my_indices)
-#     output:
-#         "merged_hmm/hmm_{sample}_{hmm_db_name}_merged.tsv"
-#     shell:
-#         "cat {input} > {output}"
-
-
-###Take the output of hmmsearch, a pvalue cutoff, and return a pandas df with matching genes in query and their associated evalue.
-def parse_hmmsearch_results(hmm_file, pvalue_cutoff):
-    list_evalue = []
-    list_id = []
-    print("Starting")
-    print(hmm_file)
-    for qresult in SearchIO.parse(hmm_file, 'hmmer3-text'):
-        hits = qresult.hits
-        print("Hits...")
-        print(hits)
-        if len(hits) > 0:
-            for i in range(0,len(hits)):
-                if hits[i].evalue < pvalue_cutoff:
-                    hit_evalue = hits[i].evalue
-                    hit_id = hits[i].id
-                    list_evalue.append(hit_evalue)
-                    list_id.append(hit_id)
-    return(pd.DataFrame({'evalue': list_evalue}, index=list_id))
-
-
-
-rule busco_input:
-    input:
-        "input_fasta/{sample}.fasta"
-    output:
-        touch("busco/input/{sample}/done")
-    threads:
-        config["params"]["busco_threads"]
-    envmodules:
-        config["modules"]["busco"]
-    params:
-         lineage=config["lineage"],
-         busco_path=config["busco_path"]
-    log:
-        out="logs/busco_input/{sample}.log",
-        err="logs/busco_input/{sample}.err"
-    shell: "busco -i {input} -f -m prot -l {params.lineage} --offline -c {threads} --download_path {params.busco_path} --out_path busco/input/ -o {wildcards.sample} > {log.out} 2> {log.err}"
-
-rule extract_busco_match:
-    input:
-        "busco/input/{sample}/done"
-    output:
-        "gene_info_table/busco_match_{sample}.txt"
-    params:
-         lineage=config["lineage"],
-    shell:
-        "grep -v \"^#\" busco/input/{wildcards.sample}/run_{params.lineage}/full_table.tsv | cut -f3 | sort -u | grep -v \"^$\"  > {output}"
-
-rule busco_output:
-    input:
-        "enriched_gff3/{sample}/{sample}_proteins.fasta"
-    output:
-        touch("busco/output/{sample}/done")
-    threads:
-        config["params"]["busco_threads"]
-    envmodules:
-        config["modules"]["busco"]
-    params:
-         lineage=config["lineage"],
-         busco_path=config["busco_path"]
-    log:
-        out="logs/busco_output/{sample}.log",
-        err="logs/busco_output/{sample}.err" 
-    shell: "busco -i {input} -f -m prot -l {params.lineage} --offline -c {threads} --download_path {params.busco_path} --out_path busco/output/ -o {wildcards.sample} > {log.out} 2> {log.err}"
+if only_reannotate:
+    rule report_only_annotate:
+        input:
+            fasta_index=rules.fasta_index.output.index,
+            ISS_protein="blast/ISS_informations/results_{sample}.iss",
+        output:
+            "pipeline_report_{sample}.html"
+        envmodules:
+            config["modules"]["R"]
+        script:
+            "pipeline_report.Rmd"
+else:
+    rule report_reannotation:
+        input:
+            fasta_index= rules.fasta_index.output.index,
+            ISS_protein="blast/ISS_informations/results_{sample}.iss",
+            ISS_TE="blast/ISS_informations/results_{sample}_TE.iss",
+            processed_gff= "enriched_gff3/{sample}/{sample}_mrna.gff3",
+            filter_summary="gene_info_table/filter_summary_{sample}.tsv",
+            proteins_index="enriched_gff3/{sample}/{sample}_proteins.fasta.fai",
+            busco_in="busco/input/{sample}/done",
+            busco_out="busco/output/{sample}/done"
+        output:
+            "pipeline_report_{sample}.html"
+        envmodules:
+            config["modules"]["R"]
+        params:
+            to_remove_string="gene_info_table/{sample}_to_remove.tsv" if only_reannotate else "",
+            filter_summary="gene_info_table/filter_summary_{sample}.tsv" if only_reannotate else ""
+        script:
+            "pipeline_report.Rmd"
 

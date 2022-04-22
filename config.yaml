@@ -1,36 +1,14 @@
 
 # Genome to be annotated (Assembly, GFF3 and corresponding protein fasta file)
-# Same keys for a genome, can be multiple
-#input_proteome:
-#  "genomeA": "path_to_proteomeA"
-#  "genomeB": "path_to_proteomeB"
-#  "genomeX": "path_to_proteomeX"
-  
-#input_gff3:
-#  "genomeA": "path_to_gffA"
-#  "genomeB": "path_to_gffB"
-#  "genomeX": "path_to_gffX"
-  
-#input_genomes:
-#  "genomeA": "path_to_genomeA"
-#  "genomeB": "path_to_genomeB"
-#  "genomeX": "path_to_genomeX"
-  
-input_proteome:
-  "DJ123": "/lustre/sorianoa/eugene_annotation_rice_new/output_egnep_2/DJ123/DJ123_prot.fna"
-
-input_gff3:
-  "DJ123": "/lustre/sorianoa/eugene_annotation_rice_new/output_egnep_2/DJ123/DJ123.gff3"
-
-input_genomes:
-  "DJ123": "/lustre/sorianoa/eugene_annotation_rice_new/output_egnep_2/DJ123/DJ123"
+# Path to directory with samples directory contained genome.fasta, genome.gff3 and genome_prot.fna/fasta files
+SAMPLES: /media/work/GIT/funcannotate/SAMPLES/
 
 # Function transfer based on sequence similarity 
 # The list is ordered according to the trust given to the database. 
 # 
 blast_databases:
-  SwissProt : "/lustre/agap/BANK/uniprot/uniprot-swissprot_33090_20210313.fasta"
-  TrEMBL: "/nfs/work/agap/BANK/uniprot/uniprot-trembl_33090_20210313.fasta"  
+  SwissProt : "./BANK/toto.fasta"
+  TrEMBL: "./BANK/toto.fasta"
 
 
 #Should be DL from https://busco-data.ezlab.org/v5/data/lineages/ and uncompress    
@@ -46,7 +24,8 @@ use_diamond: 1
 tag: "ID"
 
 # 0 Only perform functional annotation (BLAST/Diamond + InterProScan)
-# 1 For filter and check annotation quality ( filter transposable element genes and doubtful genes), refer to https://gitlab.southgreen.fr/hub/vaniseq/-/wikis/Gene-Filtering-VANPL_CR0040_3300M_all_ctg
+# 1 For filter and check annotation quality ( filter transposable element genes and doubtful genes),
+# refer to https://gitlab.southgreen.fr/hub/vaniseq/-/wikis/Gene-Filtering-VANPL_CR0040_3300M_all_ctg
 only_reannotate: 0
 
 # 
