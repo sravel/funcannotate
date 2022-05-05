@@ -100,6 +100,10 @@ blast_threads=config["params"]["global_blast_threads"]
 # print(blast_databases)
 # print(hmm_databases)
 
+#######################################
+# Change workdir to output path
+workdir:config["OUTPUT"]
+outputdir = config["OUTPUT"]
 
 ###Indices for the fasta splited files, in the form of '001', '002'...
 my_indices=[f"{i:03d}" for i in range(1, config["fasta_split_number"]+1)]
@@ -126,13 +130,23 @@ def get_db_name(wildcards):
 
 wildcard_constraints:
     sample= "|".join(SAMPLES)
+
+
+rule fasta_symlink:
+    input:
+        unpack(get_fasta),
+    output:
+       fasta = "input_fasta/{sample}.fasta"
+    shell:
+        "ln -s {input} {output}"
+
 ###########################################
 ### Create fasta index (used to get sequence length)
 rule fasta_index:
     input:
-        unpack(get_fasta),
+        fasta = rules.fasta_symlink.output.fasta
     output:
-        index = touch("toto_{sample}") ###FIXME : .fai... not idx !
+        index = "input_fasta/{sample}.fasta.idx" ###FIXME : .fai... not idx !
     envmodules:
         config["modules"]["samtools"]
     log:
@@ -146,9 +160,9 @@ rule fasta_index:
 ### Split files in n pieces
 rule split:
     input:
-        unpack(get_fasta),
+        fasta = rules.fasta_symlink.output.fasta
     output:
-        list_fasta = temp(expand("tmp_fasta/{{sample}}/{{sample}}.part_{n}.fasta",sample="{sample}", n=my_indices))
+        list_fasta = expand("tmp_fasta/{{sample}}/{{sample}}.part_{n}.fasta",sample="{sample}", n=my_indices)
     params:
         number_of_output_fasta = config["fasta_split_number"],
         sample = "{sample}"
@@ -192,13 +206,14 @@ rule build_diamond_database:
 
 rule diamond_analysis:
     input:
-        fasta_files=rules.split.output.list_fasta,
+        fasta_files=outputdir+"tmp_fasta/{sample}/{sample}.part_{indice}.fasta",
+        fasta_list = rules.split.output.list_fasta,
+        blast_db= rules.build_diamond_database.output.done,
     output:
         tsv = temp("blast/raw_diamond_output/{sample}/{db_name}_file_{sample}.part_{indice}.tsv")
     envmodules:
         config["modules"]["diamond"]
     params:
-        blast_db = rules.build_diamond_database.output.done,
         evalue=1e-10,
         max_target_seqs=2,
         mode="--very-sensitive",
@@ -213,7 +228,8 @@ rule diamond_analysis:
 
 rule blastp_computation:
     input:
-        fasta_files=rules.split.output.list_fasta,
+        fasta_files=outputdir+"tmp_fasta/{sample}/{sample}.part_{indice}.fasta",
+        fasta_list= rules.split.output.list_fasta
     output:
         tsv = temp("blast/raw_output/{sample}/{db_name}_file_{sample}.part_{indice}.tsv")
     params:
@@ -369,7 +385,7 @@ rule add_annotation_to_gff3:
 if False not in fasta_list:
     rule extract_prot_cds_sequences:
         input:
-            unpack(get_fasta),
+            rules.fasta_symlink.output.fasta,
             processed_gff = rules.add_annotation_to_gff3.output.processed_gff,
         output:
             proteins="enriched_gff3/{sample}/{sample}_proteins.fasta",
@@ -411,7 +427,7 @@ if False not in fasta_list:
 ###FIXME : useless to split, hmmsearch is very fast in our case because very few input sequences.
 rule hmm_search:
     input:
-        unpack(get_fasta),
+        rules.fasta_symlink.output.fasta,
         hmm_file=lambda wildcards: hmm_databases[wildcards.hmm_db_name]
     output:
         "hmm/hmm_search/{sample}/{hmm_db_name}.txt"
@@ -447,7 +463,7 @@ rule hmm_parse:
 
 rule busco_input:
     input:
-        unpack(get_fasta),
+        rules.fasta_symlink.output.fasta,
     output:
         touch("busco/input/{sample}/done")
     threads:

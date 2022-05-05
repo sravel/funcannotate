@@ -1,19 +1,19 @@
 
 # Genome to be annotated (Assembly, GFF3 and corresponding protein fasta file)
 # Path to directory with samples directory contained genome.fasta, genome.gff3 and genome_prot.fna/fasta files
-SAMPLES: /media/work/GIT/funcannotate/SAMPLES/
-
+SAMPLES: /shared/home/sravel/glp701/annot_func/SAMPLES/
+OUTPUT: /shared/home/sravel/glp701/annot_func/
 # Function transfer based on sequence similarity 
 # The list is ordered according to the trust given to the database. 
 # 
 blast_databases:
-  SwissProt : "./BANK/toto.fasta"
-  TrEMBL: "./BANK/toto.fasta"
+  SwissProt : "/shared/bank/uniprot_swissprot/current/fasta/uniprot_swissprot.fsa"
+  TrEMBL: "/shared/bank/uniprot/current/fasta/uniprot_trembl.fasta"
 
 
 #Should be DL from https://busco-data.ezlab.org/v5/data/lineages/ and uncompress    
-busco_path: "db/busco_downloads/"
-lineage: "viridiplantae_odb10"
+busco_path: "/shared/projects/glp701/GLP701/db/"
+lineage: "capnodiales_odb10"
 
 # Method for the protein similarity search (1 for diamond, 0 for blastp)
 use_diamond: 1
@@ -30,7 +30,7 @@ only_reannotate: 0
 
 # 
 blast_repeat_database:
-  repbase: "db/repbase23.12_aaSeq_cleaned_2020.fa"
+  repbase: "/shared/projects/glp701/annot_func/db/RepBase27.03.fasta/fugrep.ref"
 
 hmm_databases:
   Retro_gag: "db/Retrotran_gag_3.hmm"
@@ -71,7 +71,7 @@ ipro_term_to_remove:
   - "IPR018289"
 
 # Split FASTA into 10 files (increase/decrease this value if need, 5000 sequence for each part is recommended) 
-fasta_split_number: 10
+fasta_split_number: 9
 
 # Threads
 params:
@@ -82,13 +82,13 @@ params:
 
 # Use envmodules (muse-login01)
 modules:
-  samtools: "samtools/1.14-bin"
-  hmmer: "hmmer/3.3.2-bin"
-  blast: "ncbi-blast/2.10.1+"
-  interproscan: "interproscan/5.48-83.0"
-  seqkit: "seqkit/2.0.0"
-  diamond: "diamond/2.0.11"
-  func_annot: "functional_annotation/1.0.0"
-  gffread: "gffread/0.12.6"
-  busco: "busco/5.0.0"
+  samtools: "samtools"
+  hmmer: "hmmer"
+  blast: "blast"
+  interproscan: "interproscan"
+  seqkit: "seqkit"
+  diamond: "diamond"
+  func_annot: "functional_annotation"
+  gffread: "gffread"
+  busco: "busco"
   R: "R/packages/4.1.0"
